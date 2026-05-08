@@ -110,410 +110,1813 @@
         8-4-2-6 / ARROWS to Move | R to Reset<br>
         <span style="color:#00aaff">Cyan Blocks are Ghosts - Watch your timing!</span>
     </div>
+<div class="main game-content" style="height: auto !important;">
+                    <div class="row game-title">
+    <h1 class="page-header">
+        Guardian Rock
+    </h1>
+</div>
 
-<script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d', { alpha: false });
-const levelNumDisplay = document.getElementById('level-num');
-const stepCountDisplay = document.getElementById('step-count');
-const coinCountDisplay = document.getElementById('coin-count');
-const completeOverlay = document.getElementById('level-complete');
-
-const TILE_SIZE = 48;
-const COLS = 12;
-const ROWS = 10;
-canvas.width = COLS * TILE_SIZE;
-canvas.height = ROWS * TILE_SIZE;
-
-/**
- * MAP CODES:
- * 0: Empty, 1: Wall, 2: Player Start, 3: Exit, 4: Breakable, 
- * 5: Spike, 6: Coin, 7: Cannon, B: Ghost Block
- */
-const LEVEL_DATA = [
-    ["111111111111","120000000031","100000000001","100000000001","100000000001","100000000001","100000000001","100000000001","100000000001","111111111111"],
-    ["111111111111","120000001001","100000000001","100000000031","100000000001","100100001001","100000000001","100100000001","100000000001","111111111111"],
-    ["111111111111","120006001001","100000000001","100000000031","100000000001","100100061001","100000000001","100100010001","100000000001","111111111111"],
-    ["111111111111","120040001001","100000000001","100000001031","100000000001","100100000001","100000000001","100100000001","100000000001","111111111111"],
-    ["111111111111","120000005031","100010000001","100050010001","100000060001","100000000001","100000001001","100004000001","100000000001","111111111111"],
-    ["111111111111","120000000001","100000000001","100010000001","100000000031","100000000001","100000070001","100000000001","100000000001","111111111111"],
-    ["111111111111","1200B0005001","100000000001","100000000031","100000000001","100100000001","100000000001","100000000001","100000000001","111111111111"],
-    ["111111111111","120000010031","100000000001","10400B00B001","100610160001","100000000001","100001000001","100000000001","100000000001","111111111111"],
-    ["111111111111","120000000001","10001B100001","100000001001","10001B100001","100000000001","100000001001","100000000031","100000000001","111111111111"],
-    ["111111111111","1200B0401031","100000000001","111100001001","100004000001","100B00001001","100000000001","100000000001","100000000001","111111111111"]
-];
-
-const LEVELS = LEVEL_DATA.map(arr => arr.join(""));
-
-let currentLevelIndex = 0;
-let grid = [];
-let player = { x: 0, y: 0, visualX: 0, visualY: 0, isMoving: false };
-let projectiles = [];
-let pendingBreaks = []; // {x, y, startFrame}
-let steps = 0;
-let coinsRequired = 0;
-let coinsCollected = 0;
-let gameActive = true;
-let frameCount = 0;
-
-let ghostAlpha = 0;
-let isGhostSolid = false;
-
-function initLevel(index) {
-    const levelStr = LEVELS[index];
-    grid = [];
-    steps = 0;
-    coinsCollected = 0;
-    coinsRequired = 0;
-    projectiles = [];
-    pendingBreaks = [];
-    gameActive = true;
-    completeOverlay.style.display = 'none';
-
-    for (let r = 0; r < ROWS; r++) {
-        grid[r] = [];
-        for (let c = 0; c < COLS; c++) {
-            const char = levelStr[r * COLS + c];
-            const val = parseInt(char, 16);
-            
-            if (val === 2) {
-                player.x = c;
-                player.y = r;
-                player.visualX = c;
-                player.visualY = r;
-                player.isMoving = false;
-                grid[r][c] = 0;
-            } else if (val === 6) {
-                coinsRequired++;
-                grid[r][c] = val;
-            } else {
-                grid[r][c] = val;
-            }
-        }
-    }
-    updateUI();
-}
-
-function updateUI() {
-    stepCountDisplay.innerText = steps;
-    coinCountDisplay.innerText = `${coinsCollected}/${coinsRequired}`;
-    levelNumDisplay.innerText = currentLevelIndex + 1;
-}
-
-function move(dx, dy) {
-    if (player.isMoving || !gameActive) return;
-
-    let nextX = player.x;
-    let nextY = player.y;
-    let moved = false;
-
-    while (true) {
-        let testX = nextX + dx;
-        let testY = nextY + dy;
-
-        if (testX < 0 || testX >= COLS || testY < 0 || testY >= ROWS) break;
-
-        const cell = grid[testY][testX];
-
-        if (cell === 1 || (cell >= 7 && cell <= 10) || (cell === 11 && isGhostSolid)) { 
-            break;
-        } else if (cell === 4) { 
-            // Register a pending break instead of instant removal
-            if (!pendingBreaks.find(b => b.x === testX && b.y === testY)) {
-                pendingBreaks.push({ x: testX, y: testY, startFrame: frameCount });
-            }
-            moved = true;
-            break;
-        } else if (cell === 5) { 
-            nextX = testX;
-            nextY = testY;
-            moved = true;
-            break;
-        } else if (cell === 6) { 
-            grid[testY][testX] = 0;
-            coinsCollected++;
-            updateUI();
-            nextX = testX;
-            nextY = testY;
-            moved = true;
-        } else if (cell === 3) { 
-            if (coinsCollected >= coinsRequired) {
-                nextX = testX;
-                nextY = testY;
-                moved = true;
-                break;
-            } else {
-                break;
-            }
-        } else {
-            nextX = testX;
-            nextY = testY;
-            moved = true;
-        }
-    }
-
-    if (moved) {
-        steps++;
-        updateUI();
-        animateMove(nextX, nextY);
-    }
-}
-
-function animateMove(tx, ty) {
-    player.isMoving = true;
-    const startX = player.x;
-    const startY = player.y;
-    const duration = 120;
-    const startTime = performance.now();
-
-    function step(now) {
-        const elapsed = now - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        player.visualX = startX + (tx - startX) * progress;
-        player.visualY = startY + (ty - startY) * progress;
-
-        if (progress < 1) {
-            requestAnimationFrame(step);
-        } else {
-            player.x = tx;
-            player.y = ty;
-            player.visualX = tx;
-            player.visualY = ty;
-            player.isMoving = false;
-            checkLogic();
-        }
-    }
-    requestAnimationFrame(step);
-}
-
-function checkLogic() {
-    const cell = grid[player.y][player.x];
-    if (cell === 5) {
-        resetLevel(); 
-    } else if (cell === 3 && coinsCollected >= coinsRequired) {
-        winLevel();
-    }
-}
-
-function winLevel() {
-    gameActive = false;
-    completeOverlay.style.display = 'block';
-}
-
-function resetLevel() {
-    initLevel(currentLevelIndex);
-}
-
-function nextLevel() {
-    currentLevelIndex++;
-    if (currentLevelIndex >= LEVELS.length) {
-        completeOverlay.innerHTML = "<h2>GAME COMPLETE</h2><p>You have conquered the tomb!</p>";
-    } else {
-        initLevel(currentLevelIndex);
-    }
-}
-
-function updateProjectiles() {
-    if (!gameActive) return;
-
-    if (frameCount % 100 === 0) {
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const cell = grid[r][c];
-                if (cell >= 7 && cell <= 10) {
-                    const dx = player.visualX - c;
-                    const dy = player.visualY - r;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist > 0) {
-                        projectiles.push({x: c, y: r, dx: dx / dist, dy: dy / dist});
-                    }
-                }
-            }
-        }
-    }
-
-    if (frameCount % 4 === 0) {
-        for (let i = projectiles.length - 1; i >= 0; i--) {
-            const p = projectiles[i];
-            p.x += p.dx * 0.25;
-            p.y += p.dy * 0.25;
-
-            const gx = Math.round(p.x);
-            const gy = Math.round(p.y);
-            
-            if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS || 
-                grid[gy][gx] === 1 || 
-                grid[gy][gx] === 4 || 
-                (grid[gy][gx] === 11 && isGhostSolid)) {
-                projectiles.splice(i, 1);
-                continue;
-            }
-
-            const dist = Math.hypot(p.x - player.visualX, p.y - player.visualY);
-            if (dist < 0.4) {
-                resetLevel();
-                return;
-            }
-        }
-    }
-}
-
-function updatePendingBreaks() {
-    const BREAK_DELAY = 30; // Frames to wait
-    for (let i = pendingBreaks.length - 1; i >= 0; i--) {
-        const b = pendingBreaks[i];
-        if (frameCount - b.startFrame >= BREAK_DELAY) {
-            grid[b.y][b.x] = 0;
-            pendingBreaks.splice(i, 1);
-        }
-    }
-}
-
-function render() {
-    frameCount++;
-
-    const ghostPhase = frameCount % 160;
-    if (ghostPhase < 20) {
-        ghostAlpha = ghostPhase / 20; 
-        isGhostSolid = false;
-    } else if (ghostPhase < 80) {
-        ghostAlpha = 1;               
-        isGhostSolid = true;
-    } else if (ghostPhase < 100) {
-        ghostAlpha = 1 - ((ghostPhase - 80) / 20); 
-        isGhostSolid = false;
-    } else {
-        ghostAlpha = 0;               
-        isGhostSolid = false;
-    }
-
-    if (gameActive && !player.isMoving && isGhostSolid && grid[player.y][player.x] === 11) {
-        resetLevel();
-        return;
-    }
-
-    updateProjectiles();
-    updatePendingBreaks();
     
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    <div class="game-box">
+    <div id="fullscreen-mode" class="game-object center-block">
+        <div id="game-container">
+            
 
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            const x = c * TILE_SIZE;
-            const y = r * TILE_SIZE;
-            const cell = grid[r][c];
+            <iframe id="iframe-in-game" src="https://www.gameflare.com/embed/guardian-rock/" marginwidth="0" marginheight="0" frameborder="0" scrolling="no" width="576" height="483" allow="autoplay; fullscreen" allowfullscreen="" onload="iframeInGameLoaded(10)"></iframe>
+        </div>
+    </div>
 
-            ctx.strokeStyle = '#111';
-            ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+    
+    <div class="flash-attention center-block" style="max-width: 576px;">
+    <h3>
+        Warning
+    </h3>
 
-            if (cell === 1) { 
-                ctx.fillStyle = '#333';
-                ctx.fillRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-                ctx.fillStyle = '#222';
-                ctx.fillRect(x + 8, y + 8, TILE_SIZE - 16, TILE_SIZE - 16);
-            } else if (cell === 3) { 
-                const glow = Math.abs(Math.sin(frameCount * 0.05)) * 10;
-                ctx.shadowBlur = glow;
-                ctx.shadowColor = (coinsCollected >= coinsRequired) ? '#00ffcc' : '#ff3300';
-                ctx.fillStyle = ctx.shadowColor;
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, TILE_SIZE/3, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            } else if (cell === 4) { 
-                const isPending = pendingBreaks.find(b => b.x === c && b.y === r);
-                ctx.fillStyle = '#5d4037';
+    <div class="text">
+        Adobe has blocked Flash content from running in Flash Player since January 12, 2021. The emulator is still under development, but should be completed by the end of this year.
+    </div>
+</div>
+
+    
+            <div class="game-promo exclude-default-promo" style="height: auto !important;">
+            <div class="adsense">
+                <ins class="adsbygoogle show" data-ad-client="ca-pub-6997479010326903" data-ad-slot="8280981252" data-ad-format="auto" data-full-width-responsive="true" data-adsbygoogle-status="done" style="height: 280px;" data-ad-status="filled"><div id="aswift_0_host" style="border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; height: 280px; width: 400px; margin: 0px; padding: 0px; position: relative; visibility: visible; background-color: transparent; display: inline-block; overflow: visible;"><iframe id="aswift_0" name="aswift_0" style="left:0;position:absolute;top:0;border:0;width:400px;height:280px;min-height:auto;max-height:none;min-width:auto;max-width:none;" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts allow-top-navigation-by-user-activation" width="400" height="280" frameborder="0" marginwidth="0" marginheight="0" vspace="0" hspace="0" allowtransparency="true" scrolling="no" allow="attribution-reporting; run-ad-auction" src="https://googleads.g.doubleclick.net/pagead/ads?gdpr=0&amp;client=ca-pub-6997479010326903&amp;output=html&amp;h=280&amp;slotname=8280981252&amp;adk=5888433&amp;adf=2758228939&amp;pi=t.ma~as.8280981252&amp;w=400&amp;fwrn=4&amp;fwrnh=100&amp;lmt=1778277723&amp;rafmt=1&amp;format=400x280&amp;url=https%3A%2F%2Fwww.gameflare.com%2Fonline-game%2Fguardian-rock%2F&amp;fwr=0&amp;fwrattr=true&amp;rpe=1&amp;resp_fmts=3&amp;asro=0&amp;aiactd=0&amp;aicctd=0&amp;ailctd=0&amp;aimartd=4&amp;aieuf=1&amp;aicrs=1&amp;uach=WyJXaW5kb3dzIiwiMTAuMC4wIiwieDg2IiwiIiwiMTQ3LjAuNzcyNy4xMTYiLG51bGwsMCxudWxsLCI2NCIsW1siR29vZ2xlIENocm9tZSIsIjE0Ny4wLjc3MjcuMTE2Il0sWyJOb3QuQS9CcmFuZCIsIjguMC4wLjAiXSxbIkNocm9taXVtIiwiMTQ3LjAuNzcyNy4xMTYiXV0sMF0.&amp;abgtt=11&amp;dt=1778277722292&amp;bpp=6&amp;bdt=1141&amp;idt=413&amp;shv=r20260506&amp;mjsv=m202605040101&amp;ptt=9&amp;saldr=aa&amp;abxe=1&amp;cookie_enabled=1&amp;eoidce=1&amp;correlator=3878780051820&amp;frm=20&amp;pv=2&amp;u_tz=-240&amp;u_his=3&amp;u_h=1080&amp;u_w=1920&amp;u_ah=1040&amp;u_aw=1920&amp;u_cd=32&amp;u_sd=1&amp;dmc=8&amp;adx=1465&amp;ady=155&amp;biw=1905&amp;bih=953&amp;scr_x=0&amp;scr_y=0&amp;eid=31098359%2C95386813%2C42533294%2C95340253%2C95340255&amp;oid=2&amp;pvsid=7706203210003261&amp;tmod=434904251&amp;uas=0&amp;nvt=1&amp;ref=https%3A%2F%2Fwww.google.com%2F&amp;fc=896&amp;brdim=0%2C0%2C0%2C0%2C1920%2C0%2C1920%2C1040%2C1920%2C953&amp;vis=1&amp;rsz=%7C%7CaoeE%7C&amp;abl=CA&amp;pfx=0&amp;fu=128&amp;bc=31&amp;bz=1&amp;ifi=1&amp;uci=a!1&amp;fsb=1&amp;dtd=857" data-google-container-id="a!1" tabindex="0" title="Advertisement" aria-label="Advertisement" data-google-query-id="CMqK5t_YqpQDFe5ALQQdkJMc6w" data-load-complete="true"></iframe></div></ins>
+            </div>
+
+            <div class="own-game-promo" oncontextmenu="return false;"></div>
+
+            <script>
+                window.addEventListener('DOMContentLoaded', function() {
+                    checkPromo([
+                        'https://www.gameflare.com/U3WAbEh5VQxOJo/game/o/576/',
+                        'https://www.gameflare.com/U3WAbEh5VQxOJo/game/c/576/'
+                    ], '.own-game-promo');
+
+                    $(document).on('runBackupForDisabledAdsByEU', function() {
+                        checkPromo([
+                            'https://www.gameflare.com/U3WAbEh5VQxOJo/game/o/576/',
+                            'https://www.gameflare.com/U3WAbEh5VQxOJo/game/c/576/'
+                        ], '.own-game-promo');
+                    });
+                });
+            </script>
+        
+        
+                    </div>
+    </div>
+
+
+    <div class="game-details">
+    <div class="row">
+        <div class="col-sm-2 game-icon">
+            <img src="https://data.gameflare.com/games/435/t5eSORvegIpt98-220-165.jpg" width="200" height="150" alt="Guardian Rock online game" class="center-block">
+        </div>
+
+        <div class="col-sm-8">
+            <div class="game-details-title">
+                <h2>
+                    Guardian Rock
+
+                                    </h2>
+
+                <button id="game-rating" type="button" class="btn btn-warning nohover">57%</button>
+
+                <button type="button" class="btn btn-warning game-favourite" data-tooltip="tooltip" title="" data-toggle="modal" data-target="#report-game" data-original-title="Report broken game">
+                    <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-exclamation-circle fa-w-16" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="exclamation-circle" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M504 256c0 136.997-111.043 248-248 248S8 392.997 8 256C8 119.083 119.043 8 256 8s248 111.083 248 248zm-248 50c-25.405 0-46 20.595-46 46s20.595 46 46 46 46-20.595 46-46-20.595-46-46-46zm-43.673-165.346l7.418 136c.347 6.364 5.609 11.346 11.982 11.346h48.546c6.373 0 11.635-4.982 11.982-11.346l7.418-136c.375-6.874-5.098-12.654-11.982-12.654h-63.383c-6.884 0-12.356 5.78-11.981 12.654z"></path></svg></i>
+                </button>
+
+                                    <button type="button" class="btn btn-danger game-favourite" data-tooltip="tooltip" title="" data-original-title="You must be logged in to add game to your favorite games">
+                        <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-heart fa-w-16" aria-hidden="true" focusable="false" data-prefix="far" data-icon="heart" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M458.4 64.3C400.6 15.7 311.3 23 256 79.3 200.7 23 111.4 15.6 53.6 64.3-21.6 127.6-10.6 230.8 43 285.5l175.4 178.7c10 10.2 23.4 15.9 37.6 15.9 14.3 0 27.6-5.6 37.6-15.8L469 285.6c53.5-54.7 64.7-157.9-10.6-221.3zm-23.6 187.5L259.4 430.5c-2.4 2.4-4.4 2.4-6.8 0L77.2 251.8c-36.5-37.2-43.9-107.6 7.3-150.7 38.9-32.7 98.9-27.8 136.5 10.5l35 35.7 35-35.7c37.8-38.5 97.8-43.2 136.5-10.6 51.1 43.1 43.5 113.9 7.3 150.8z"></path></svg></i>
+
+                        <span class="badge">
+                            1
+                        </span>
+                    </button>
+                            </div>
+
+            <div class="game-rating no-select">
+                                    <div id="vote-like" class="thumbs like" data-like="true">
+                        <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-thumbs-up fa-w-16 fa-fw fa-2x" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="thumbs-up" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M104 224H24c-13.255 0-24 10.745-24 24v240c0 13.255 10.745 24 24 24h80c13.255 0 24-10.745 24-24V248c0-13.255-10.745-24-24-24zM64 472c-13.255 0-24-10.745-24-24s10.745-24 24-24 24 10.745 24 24-10.745 24-24 24zM384 81.452c0 42.416-25.97 66.208-33.277 94.548h101.723c33.397 0 59.397 27.746 59.553 58.098.084 17.938-7.546 37.249-19.439 49.197l-.11.11c9.836 23.337 8.237 56.037-9.308 79.469 8.681 25.895-.069 57.704-16.382 74.757 4.298 17.598 2.244 32.575-6.148 44.632C440.202 511.587 389.616 512 346.839 512l-2.845-.001c-48.287-.017-87.806-17.598-119.56-31.725-15.957-7.099-36.821-15.887-52.651-16.178-6.54-.12-11.783-5.457-11.783-11.998v-213.77c0-3.2 1.282-6.271 3.558-8.521 39.614-39.144 56.648-80.587 89.117-113.111 14.804-14.832 20.188-37.236 25.393-58.902C282.515 39.293 291.817 0 312 0c24 0 72 8 72 81.452z"></path></svg></i>
+
+                        <span class="count">4</span>
+                    </div>
+
+                    <div id="vote-dislike" class="thumbs dislike" data-like="false">
+                        <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-thumbs-down fa-w-16 fa-fw fa-2x" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="thumbs-down" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M0 56v240c0 13.255 10.745 24 24 24h80c13.255 0 24-10.745 24-24V56c0-13.255-10.745-24-24-24H24C10.745 32 0 42.745 0 56zm40 200c0-13.255 10.745-24 24-24s24 10.745 24 24-10.745 24-24 24-24-10.745-24-24zm272 256c-20.183 0-29.485-39.293-33.931-57.795-5.206-21.666-10.589-44.07-25.393-58.902-32.469-32.524-49.503-73.967-89.117-113.111a11.98 11.98 0 0 1-3.558-8.521V59.901c0-6.541 5.243-11.878 11.783-11.998 15.831-.29 36.694-9.079 52.651-16.178C256.189 17.598 295.709.017 343.995 0h2.844c42.777 0 93.363.413 113.774 29.737 8.392 12.057 10.446 27.034 6.148 44.632 16.312 17.053 25.063 48.863 16.382 74.757 17.544 23.432 19.143 56.132 9.308 79.469l.11.11c11.893 11.949 19.523 31.259 19.439 49.197-.156 30.352-26.157 58.098-59.553 58.098H350.723C358.03 364.34 384 388.132 384 430.548 384 504 336 512 312 512z"></path></svg></i>
+
+                        <span class="count">3</span>
+                    </div>
+                            </div>
+
+            <div class="game-developer">
+                <span class="game-published"> •
+                    Published Sep 1st, 2009 with 13582 plays
+                </span>
+
                 
-                let shakeX = 0;
-                let shakeY = 0;
-                if (isPending) {
-                    shakeX = (Math.random() - 0.5) * 4;
-                    shakeY = (Math.random() - 0.5) * 4;
-                    ctx.fillStyle = '#8d6e63'; 
-                }
+                            </div>
 
-                ctx.fillRect(x + 4 + shakeX, y + 4 + shakeY, TILE_SIZE - 8, TILE_SIZE - 8);
-                ctx.strokeStyle = '#3e2723';
-                ctx.strokeRect(x + 8 + shakeX, y + 8 + shakeY, TILE_SIZE - 16, TILE_SIZE - 16);
+                            <div class="game-tags">
+                                            <a href="https://www.gameflare.com/puzzle-games/" class="btn btn-xs" role="button">
+                            Puzzle Games
+                        </a>
+                                            <a href="https://www.gameflare.com/funny-games/" class="btn btn-xs" role="button">
+                            Funny Games
+                        </a>
+                                            <a href="https://www.gameflare.com/obstacle-games/" class="btn btn-xs" role="button">
+                            Obstacle Games
+                        </a>
+                                    </div>
+                    </div>
+
+        <div class="col-sm-2">
+            <div class="game-platforms">
+                Platforms:
+
+                <br>
+
+                <p class="platform" data-tooltip="tooltip" data-placement="right" title="" data-original-title="Flash">
+                                            <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-desktop fa-w-18 fa-lg fa-fw" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="desktop" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" data-fa-i2svg=""><path fill="currentColor" d="M528 0H48C21.5 0 0 21.5 0 48v320c0 26.5 21.5 48 48 48h192l-16 48h-72c-13.3 0-24 10.7-24 24s10.7 24 24 24h272c13.3 0 24-10.7 24-24s-10.7-24-24-24h-72l-16-48h192c26.5 0 48-21.5 48-48V48c0-26.5-21.5-48-48-48zm-16 352H64V64h448v288z"></path></svg></i>
+                                    </p>
+            </div>
+
+            <div class="game-share">
+    Share on:
+
+    <div class="icons">
+        <span data-placement="bottom" data-tooltip="tooltip" title="" onclick="window.open('https://www.facebook.com/sharer.php?u=https://www.gameflare.com/online-game/guardian-rock/', '_blank', 'width=655,height=455'); return false" data-original-title="Share on Facebook.com"><i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-facebook-square fa-w-14" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="facebook-square" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" data-fa-i2svg=""><path fill="currentColor" d="M400 32H48A48 48 0 0 0 0 80v352a48 48 0 0 0 48 48h137.25V327.69h-63V256h63v-54.64c0-62.15 37-96.48 93.67-96.48 27.14 0 55.52 4.84 55.52 4.84v61h-31.27c-30.81 0-40.42 19.12-40.42 38.73V256h68.78l-11 71.69h-57.78V480H400a48 48 0 0 0 48-48V80a48 48 0 0 0-48-48z"></path></svg></i></span>
+
+        <span class="twitter-x-parent" data-placement="bottom" data-tooltip="tooltip" title="" onclick="window.open('https://x.com/share?text=Guardian Rock&amp;url=https://www.gameflare.com/online-game/guardian-rock/', '_blank', 'width=655,height=455'); return false" data-original-title="Share on X.com">
+            <i class="twitter-x">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                    <g>
+                        <polygon points="12.153992,10.729553 8.088684,5.041199 5.92041,5.041199 10.956299,12.087097 11.59021,12.97345 15.900635,19.009583 18.068909,19.009583 12.785217,11.615906"></polygon>
+
+                        <path d="M21.15979,1H2.84021C1.823853,1,1,1.823853,1,2.84021v18.31958C1,22.176147,1.823853,23,2.84021,23h18.31958   C22.176147,23,23,22.176147,23,21.15979V2.84021C23,1.823853,22.176147,1,21.15979,1z M15.235352,20l-4.362549-6.213013   L5.411438,20H4l6.246887-7.104675L4,4h4.764648l4.130127,5.881958L18.06958,4h1.411377l-5.95697,6.775635L20,20H15.235352z"></path>
+                    </g>
+                </svg>
+            </i>
+        </span>
+
+        <span data-placement="bottom" data-tooltip="tooltip" title="" onclick="window.open('https://api.whatsapp.com/send?text=https://www.gameflare.com/online-game/guardian-rock/', '_blank', 'width=655,height=455'); return false" data-original-title="Share on WhatsApp"><i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-whatsapp-square fa-w-14" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="whatsapp-square" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" data-fa-i2svg=""><path fill="currentColor" d="M224 122.8c-72.7 0-131.8 59.1-131.9 131.8 0 24.9 7 49.2 20.2 70.1l3.1 5-13.3 48.6 49.9-13.1 4.8 2.9c20.2 12 43.4 18.4 67.1 18.4h.1c72.6 0 133.3-59.1 133.3-131.8 0-35.2-15.2-68.3-40.1-93.2-25-25-58-38.7-93.2-38.7zm77.5 188.4c-3.3 9.3-19.1 17.7-26.7 18.8-12.6 1.9-22.4.9-47.5-9.9-39.7-17.2-65.7-57.2-67.7-59.8-2-2.6-16.2-21.5-16.2-41s10.2-29.1 13.9-33.1c3.6-4 7.9-5 10.6-5 2.6 0 5.3 0 7.6.1 2.4.1 5.7-.9 8.9 6.8 3.3 7.9 11.2 27.4 12.2 29.4s1.7 4.3.3 6.9c-7.6 15.2-15.7 14.6-11.6 21.6 15.3 26.3 30.6 35.4 53.9 47.1 4 2 6.3 1.7 8.6-1 2.3-2.6 9.9-11.6 12.5-15.5 2.6-4 5.3-3.3 8.9-2 3.6 1.3 23.1 10.9 27.1 12.9s6.6 3 7.6 4.6c.9 1.9.9 9.9-2.4 19.1zM400 32H48C21.5 32 0 53.5 0 80v352c0 26.5 21.5 48 48 48h352c26.5 0 48-21.5 48-48V80c0-26.5-21.5-48-48-48zM223.9 413.2c-26.6 0-52.7-6.7-75.8-19.3L64 416l22.5-82.2c-13.9-24-21.2-51.3-21.2-79.3C65.4 167.1 136.5 96 223.9 96c42.4 0 82.2 16.5 112.2 46.5 29.9 30 47.9 69.8 47.9 112.2 0 87.4-72.7 158.5-160.1 158.5z"></path></svg></i></span>
+
+        <span data-placement="bottom" data-tooltip="tooltip" title="" onclick="window.open('https://reddit.com/submit?url=https://www.gameflare.com/online-game/guardian-rock/&amp;title=Guardian Rock', '_blank', 'width=655,height=455'); return false" data-original-title="Share on Reddit"><i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-reddit-square fa-w-14" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="reddit-square" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" data-fa-i2svg=""><path fill="currentColor" d="M283.2 345.5c2.7 2.7 2.7 6.8 0 9.2-24.5 24.5-93.8 24.6-118.4 0-2.7-2.4-2.7-6.5 0-9.2 2.4-2.4 6.5-2.4 8.9 0 18.7 19.2 81 19.6 100.5 0 2.4-2.3 6.6-2.3 9 0zm-91.3-53.8c0-14.9-11.9-26.8-26.5-26.8-14.9 0-26.8 11.9-26.8 26.8 0 14.6 11.9 26.5 26.8 26.5 14.6 0 26.5-11.9 26.5-26.5zm90.7-26.8c-14.6 0-26.5 11.9-26.5 26.8 0 14.6 11.9 26.5 26.5 26.5 14.9 0 26.8-11.9 26.8-26.5 0-14.9-11.9-26.8-26.8-26.8zM448 80v352c0 26.5-21.5 48-48 48H48c-26.5 0-48-21.5-48-48V80c0-26.5 21.5-48 48-48h352c26.5 0 48 21.5 48 48zm-99.7 140.6c-10.1 0-19 4.2-25.6 10.7-24.1-16.7-56.5-27.4-92.5-28.6l18.7-84.2 59.5 13.4c0 14.6 11.9 26.5 26.5 26.5 14.9 0 26.8-12.2 26.8-26.8 0-14.6-11.9-26.8-26.8-26.8-10.4 0-19.3 6.2-23.8 14.9l-65.7-14.6c-3.3-.9-6.5 1.5-7.4 4.8l-20.5 92.8c-35.7 1.5-67.8 12.2-91.9 28.9-6.5-6.8-15.8-11-25.9-11-37.5 0-49.8 50.4-15.5 67.5-1.2 5.4-1.8 11-1.8 16.7 0 56.5 63.7 102.3 141.9 102.3 78.5 0 142.2-45.8 142.2-102.3 0-5.7-.6-11.6-2.1-17 33.6-17.2 21.2-67.2-16.1-67.2z"></path></svg></i></span>
+
+        <span data-placement="bottom" data-tooltip="tooltip" title="" onclick="window.open('https://vk.com/share.php?url=https://www.gameflare.com/online-game/guardian-rock/', '_blank', 'width=655,height=455'); return false" data-original-title="Share on VK.com"><i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-vk fa-w-18" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="vk" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" data-fa-i2svg=""><path fill="currentColor" d="M545 117.7c3.7-12.5 0-21.7-17.8-21.7h-58.9c-15 0-21.9 7.9-25.6 16.7 0 0-30 73.1-72.4 120.5-13.7 13.7-20 18.1-27.5 18.1-3.7 0-9.4-4.4-9.4-16.9V117.7c0-15-4.2-21.7-16.6-21.7h-92.6c-9.4 0-15 7-15 13.5 0 14.2 21.2 17.5 23.4 57.5v86.8c0 19-3.4 22.5-10.9 22.5-20 0-68.6-73.4-97.4-157.4-5.8-16.3-11.5-22.9-26.6-22.9H38.8c-16.8 0-20.2 7.9-20.2 16.7 0 15.6 20 93.1 93.1 195.5C160.4 378.1 229 416 291.4 416c37.5 0 42.1-8.4 42.1-22.9 0-66.8-3.4-73.1 15.4-73.1 8.7 0 23.7 4.4 58.7 38.1 40 40 46.6 57.9 69 57.9h58.9c16.8 0 25.3-8.4 20.4-25-11.2-34.9-86.9-106.7-90.3-111.5-8.7-11.2-6.2-16.2 0-26.2.1-.1 72-101.3 79.4-135.6z"></path></svg></i></span>
+    </div>
+</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-sm-2 game-embed-code pull-right">
+                            <button type="button" class="btn btn-embed btn-block" data-toggle="modal" data-target="#embed-code">
+                    Embed code
+                </button>
+                    </div>
+
+        <div class="col-sm-10">
+            <ul class="nav nav-tabs" role="tablist">
+                <li role="presentation" class="active">
+                    <a href="#overview" role="tab" data-toggle="tab">
+                        <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-home fa-w-18 fa-fw" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="home" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" data-fa-i2svg=""><path fill="currentColor" d="M280.37 148.26L96 300.11V464a16 16 0 0 0 16 16l112.06-.29a16 16 0 0 0 15.92-16V368a16 16 0 0 1 16-16h64a16 16 0 0 1 16 16v95.64a16 16 0 0 0 16 16.05L464 480a16 16 0 0 0 16-16V300L295.67 148.26a12.19 12.19 0 0 0-15.3 0zM571.6 251.47L488 182.56V44.05a12 12 0 0 0-12-12h-56a12 12 0 0 0-12 12v72.61L318.47 43a48 48 0 0 0-61 0L4.34 251.47a12 12 0 0 0-1.6 16.9l25.5 31A12 12 0 0 0 45.15 301l235.22-193.74a12.19 12.19 0 0 1 15.3 0L530.9 301a12 12 0 0 0 16.9-1.6l25.5-31a12 12 0 0 0-1.7-16.93z"></path></svg></i> Overview
+                    </a>
+                </li>
+
+                                    <li role="presentation">
+                        <a href="#videos" role="tab" data-toggle="tab">
+                            <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-video fa-w-18 fa-fw" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="video" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" data-fa-i2svg=""><path fill="currentColor" d="M336.2 64H47.8C21.4 64 0 85.4 0 111.8v288.4C0 426.6 21.4 448 47.8 448h288.4c26.4 0 47.8-21.4 47.8-47.8V111.8c0-26.4-21.4-47.8-47.8-47.8zm189.4 37.7L416 177.3v157.4l109.6 75.5c21.2 14.6 50.4-.3 50.4-25.8V127.5c0-25.4-29.1-40.4-50.4-25.8z"></path></svg></i> Gameplays
+                        </a>
+                    </li>
                 
-                if (isPending) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + 10 + shakeX, y + 10 + shakeY);
-                    ctx.lineTo(x + 30 + shakeX, y + 38 + shakeY);
-                    ctx.stroke();
-                }
-            } else if (cell === 5) { 
-                ctx.fillStyle = '#777';
-                for (let i = 0; i < 3; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + (i * 15) + 5, y + TILE_SIZE - 5);
-                    ctx.lineTo(x + (i * 15) + 12, y + 5);
-                    ctx.lineTo(x + (i * 15) + 19, y + TILE_SIZE - 5);
-                    ctx.fill();
-                }
-            } else if (cell === 6) { 
-                const bounce = Math.sin(frameCount * 0.1) * 5;
-                ctx.fillStyle = '#ffd700';
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2 + bounce, 8, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#b8860b';
-                ctx.stroke();
-            } else if (cell >= 7 && cell <= 10) { 
-                ctx.fillStyle = '#444';
-                ctx.fillRect(x + 4, y + 4, TILE_SIZE-8, TILE_SIZE-8);
-                ctx.fillStyle = '#000';
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 10, 0, Math.PI*2);
-                ctx.fill();
-            } else if (cell === 11) { 
-                ctx.save();
-                ctx.globalAlpha = 0.15 + (ghostAlpha * 0.85); 
-                ctx.fillStyle = '#00aaff';
-                ctx.fillRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
-                ctx.globalAlpha = ghostAlpha;
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(x + 6, y + 6, TILE_SIZE - 12, TILE_SIZE - 12);
-                ctx.restore();
-            }
-        }
-    }
+                
+                
+                            </ul>
+        </div>
+    </div>
+</div>
 
-    ctx.fillStyle = '#ff3300';
-    projectiles.forEach(p => {
-        ctx.beginPath();
-        ctx.arc(p.x * TILE_SIZE + TILE_SIZE/2, p.y * TILE_SIZE + TILE_SIZE/2, 6, 0, Math.PI*2);
-        ctx.fill();
-    });
 
-    const px = player.visualX * TILE_SIZE;
-    const py = player.visualY * TILE_SIZE;
-    ctx.fillStyle = '#888';
-    ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(px + 10, py + 14, 8, 8);
-    ctx.fillRect(px + TILE_SIZE - 18, py + 14, 8, 8);
-    ctx.fillStyle = '#ff0000'; 
-    ctx.fillRect(px + 12, py + 16, 4, 4);
-    ctx.fillRect(px + TILE_SIZE - 16, py + 16, 4, 4);
+    <div class="row tab-content">
+    <div class="tab-pane fade in active" role="tabpanel" id="overview">
+    <div class="col-xs-12 col-sm-6 col-lg-5">
+        <div class="game-controls">
+            <h3>Controls:</h3>
 
-    requestAnimationFrame(render);
-}
+            <p class="simple-text">
+        movement: arrow keys, using the key - S, restart - R
+    </p>
+        </div>
 
-window.addEventListener('keydown', (e) => {
-    switch(e.key) {
-        case '8': case 'ArrowUp': move(0, -1); break;
-        case '2': case 'ArrowDown': move(0, 1); break;
-        case '4': case 'ArrowLeft': move(-1, 0); break;
-        case '6': case 'ArrowRight': move(1, 0); break;
-        case 'r': case 'R': resetLevel(); break;
-    }
-});
+            </div>
 
-initLevel(0);
-requestAnimationFrame(render);
-</script>
+    <div class="col-xs-12 col-sm-6 col-lg-7 game-description">
+        <div>Using your rock destroy all the archaeologists. Your rock can be moved from left to right or top-down. without stopping.</div>
+
+            </div>
+</div>
+
+    <div class="tab-pane fade" role="tabpanel" id="videos">
+    <div class="row games-list games-similar clearfix">
+                    <div class="text-center">
+                <i class="text-danger" data-fa-i2svg=""><svg class="svg-inline--fa fa-play-circle fa-w-16 fa-4x" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="play-circle" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8zm115.7 272l-176 101c-15.8 8.8-35.7-2.5-35.7-21V152c0-18.4 19.8-29.8 35.7-21l176 107c16.4 9.2 16.4 32.9 0 42z"></path></svg></i>
+
+                <br>
+
+                <span class="gameplays-info">
+                    There are no gameplays yet.
+
+                    <br>
+
+                    Add the first one!
+                </span>
+
+                <br>
+
+                <a href="https://www.gameflare.com/news/article/become-a-youtuber-and-get-more-views-for-your-video/" class="btn btn-danger" target="_blank">
+                    How to add gameplay!
+                </a>
+            </div>
+            </div>
+</div>
+
+    
+    
+    </div>
+
+    <div class="row slider-section">
+    <div class="swiper related-items-slider games-cells swiper-initialized swiper-horizontal swiper-pointer-events">
+        <div class="swiper-wrapper" id="swiper-wrapper-f01052fa73b4b10b6" aria-live="off" style="transform: translate3d(-1120.62px, 0px, 0px); transition-duration: 0ms;">
+                                                <div class="swiper-slide" role="group" aria-label="1 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Pin-Town">
+        <a href="https://www.gameflare.com/online-game/pin-town/" target="_self">
+            <img srcset="https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-120-90.jpg 120w,
+                    https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-150-113.jpg 150w,
+                    https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-180-135.jpg 180w,
+                    https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-220-165.jpg 220w,
+                    https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/7790/Jz4vvG0TEBIduh-400-300.jpg" alt="Pin-Town online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">100%</span>
+
+            <span class="label label-primary">7.3k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/pin-town/" target="_self">
+                Pin-Town
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 12th, 2017</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Send all of the objects onto clouds and try to get rid of them.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="2 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Screw the Nut 3">
+        <a href="https://www.gameflare.com/online-game/screw-the-nut-3/" target="_self">
+            <img srcset="https://data.gameflare.com/games/3961/ukQI0z2M965GoC-120-90.jpg 120w,
+                    https://data.gameflare.com/games/3961/ukQI0z2M965GoC-150-113.jpg 150w,
+                    https://data.gameflare.com/games/3961/ukQI0z2M965GoC-180-135.jpg 180w,
+                    https://data.gameflare.com/games/3961/ukQI0z2M965GoC-220-165.jpg 220w,
+                    https://data.gameflare.com/games/3961/ukQI0z2M965GoC-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/3961/ukQI0z2M965GoC-400-300.jpg" alt="Screw the Nut 3 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">79%</span>
+
+            <span class="label label-primary">6.4k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/screw-the-nut-3/" target="_self">
+                Screw the Nut 3
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 28th, 2013</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Logic game in which you must get the screw to the right place.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="3 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Wake Up The Box 5">
+        <a href="https://www.gameflare.com/online-game/wake-up-the-box-5/" target="_self">
+            <img srcset="https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-120-90.jpg 120w,
+                    https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-150-113.jpg 150w,
+                    https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-180-135.jpg 180w,
+                    https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-220-165.jpg 220w,
+                    https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/3363/sSjJkSg6Ffz2VF-400-300.jpg" alt="Wake Up The Box 5 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">89%</span>
+
+            <span class="label label-primary">14.0k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/wake-up-the-box-5/" target="_self">
+                Wake Up The Box 5
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Dec 22nd, 2012</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Wake up the sleeping boxes in all the levels.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="4 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Cover Orange - Players Pack 3">
+        <a href="https://www.gameflare.com/online-game/cover-orange-players-pack-3/" target="_self">
+            <img srcset="https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-120-90.jpg 120w,
+                    https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-150-113.jpg 150w,
+                    https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-180-135.jpg 180w,
+                    https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-220-165.jpg 220w,
+                    https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/2715/Vy7LgvekzsHDjo-400-300.jpg" alt="Cover Orange - Players Pack 3 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">86%</span>
+
+            <span class="label label-primary">12.4k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/cover-orange-players-pack-3/" target="_self">
+                Cover Orange - Players Pack 3
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Jun 16th, 2012</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            The nice game Cover Orange brings new levels, in which you try to protect the orange.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide swiper-slide-prev" role="group" aria-label="5 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Wake Up The Box 4">
+        <a href="https://www.gameflare.com/online-game/wake-up-the-box-4/" target="_self">
+            <img srcset="https://data.gameflare.com/games/2667/pLF31XlHKazJYw-120-90.jpg 120w,
+                    https://data.gameflare.com/games/2667/pLF31XlHKazJYw-150-113.jpg 150w,
+                    https://data.gameflare.com/games/2667/pLF31XlHKazJYw-180-135.jpg 180w,
+                    https://data.gameflare.com/games/2667/pLF31XlHKazJYw-220-165.jpg 220w,
+                    https://data.gameflare.com/games/2667/pLF31XlHKazJYw-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/2667/pLF31XlHKazJYw-400-300.jpg" alt="Wake Up The Box 4 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">89%</span>
+
+            <span class="label label-primary">20.1k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/wake-up-the-box-4/" target="_self">
+                Wake Up The Box 4
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 29th, 2012</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Wake up the sleeping boxes using various objects.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide swiper-slide-active" role="group" aria-label="6 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Werebox 2">
+        <a href="https://www.gameflare.com/online-game/werebox-2/" target="_self">
+            <img srcset="https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-120-90.jpg 120w,
+                    https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-150-113.jpg 150w,
+                    https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-180-135.jpg 180w,
+                    https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-220-165.jpg 220w,
+                    https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/2665/JMisqE4YN3RNVN-400-300.jpg" alt="Werebox 2 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">90%</span>
+
+            <span class="label label-primary">7.6k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/werebox-2/" target="_self">
+                Werebox 2
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 28th, 2012</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Remove the red boxes from the platform and leave the others there.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide swiper-slide-next" role="group" aria-label="7 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Wake Up The Box 3">
+        <a href="https://www.gameflare.com/online-game/wake-up-the-box-3/" target="_self">
+            <img srcset="https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-120-90.jpg 120w,
+                    https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-150-113.jpg 150w,
+                    https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-180-135.jpg 180w,
+                    https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-220-165.jpg 220w,
+                    https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/2231/jg4W4MKmjj3JWv-400-300.jpg" alt="Wake Up The Box 3 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">87%</span>
+
+            <span class="label label-primary">11.6k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/wake-up-the-box-3/" target="_self">
+                Wake Up The Box 3
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Dec 25th, 2011</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            In this simple game you try to wake up the sleeping boxes.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="8 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Steampunk">
+        <a href="https://www.gameflare.com/online-game/steampunk/" target="_self">
+            <img srcset="https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-120-90.jpeg 120w,
+                    https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-150-113.jpeg 150w,
+                    https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-180-135.jpeg 180w,
+                    https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-220-165.jpeg 220w,
+                    https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-400-300.jpeg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/1843/CrdhydHOAb4mnL-400-300.jpeg" alt="Steampunk online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">93%</span>
+
+            <span class="label label-primary">5.7k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/steampunk/" target="_self">
+                Steampunk
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Jun 1st, 2011</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            In this game you try to get the robot safely to the ground. The exact opposite w...
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="9 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Cover Orange Players Pack 2">
+        <a href="https://www.gameflare.com/online-game/cover-orange-players-pack-2/" target="_self">
+            <img srcset="https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-120-90.jpg 120w,
+                    https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-150-113.jpg 150w,
+                    https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-180-135.jpg 180w,
+                    https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-220-165.jpg 220w,
+                    https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/1623/ZUbomgXty2sJTQ-400-300.jpg" alt="Cover Orange Players Pack 2 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">92%</span>
+
+            <span class="label label-primary">13.2k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/cover-orange-players-pack-2/" target="_self">
+                Cover Orange Players Pack 2
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Mar 17th, 2011</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Another Cover Orange game is here. You have to rearrange various things to save the fruit from harmful rain.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="10 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Crash The Robot">
+        <a href="https://www.gameflare.com/online-game/crash-the-robot/" target="_self">
+            <img srcset="https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-120-90.jpg 120w,
+                    https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-150-113.jpg 150w,
+                    https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-180-135.jpg 180w,
+                    https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-220-165.jpg 220w,
+                    https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/1614/RpPIQK7HCWcqzN-400-300.jpg" alt="Crash The Robot online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">79%</span>
+
+            <span class="label label-primary">9.2k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/crash-the-robot/" target="_self">
+                Crash The Robot
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Mar 15th, 2011</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            In this logic game your task is to place the bomb to cause the destruction of the robot.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="11 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Yellow Out">
+        <a href="https://www.gameflare.com/online-game/yellow-out/" target="_self">
+            <img srcset="https://data.gameflare.com/games/1140/awWfqlaJLExuGd-120-90.jpg 120w,
+                    https://data.gameflare.com/games/1140/awWfqlaJLExuGd-150-113.jpg 150w,
+                    https://data.gameflare.com/games/1140/awWfqlaJLExuGd-180-135.jpg 180w,
+                    https://data.gameflare.com/games/1140/awWfqlaJLExuGd-220-165.jpg 220w,
+                    https://data.gameflare.com/games/1140/awWfqlaJLExuGd-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/1140/awWfqlaJLExuGd-400-300.jpg" alt="Yellow Out online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">89%</span>
+
+            <span class="label label-primary">6.9k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/yellow-out/" target="_self">
+                Yellow Out
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Oct 12th, 2010</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Your task is to move the cars so that you get the yellow cabriolet out of the ca...
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="12 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Wake Up the Box 2">
+        <a href="https://www.gameflare.com/online-game/wake-up-the-box-2/" target="_self">
+            <img srcset="https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-120-90.jpg 120w,
+                    https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-150-113.jpg 150w,
+                    https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-180-135.jpg 180w,
+                    https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-220-165.jpg 220w,
+                    https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/1105/kA6aXZwsnlN9fG-400-300.jpg" alt="Wake Up the Box 2 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">88%</span>
+
+            <span class="label label-primary">6.8k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/wake-up-the-box-2/" target="_self">
+                Wake Up the Box 2
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Oct 3rd, 2010</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Your only task will be to wake up the sleeping box. You have to figure out how t...
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="13 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Screw the Nut 2">
+        <a href="https://www.gameflare.com/online-game/screw-the-nut-2/" target="_self">
+            <img srcset="https://data.gameflare.com/games/858/MPsrSuAH4BMNac-120-90.jpeg 120w,
+                    https://data.gameflare.com/games/858/MPsrSuAH4BMNac-150-113.jpeg 150w,
+                    https://data.gameflare.com/games/858/MPsrSuAH4BMNac-180-135.jpeg 180w,
+                    https://data.gameflare.com/games/858/MPsrSuAH4BMNac-220-165.jpeg 220w,
+                    https://data.gameflare.com/games/858/MPsrSuAH4BMNac-400-300.jpeg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/858/MPsrSuAH4BMNac-400-300.jpeg" alt="Screw the Nut 2 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">75%</span>
+
+            <span class="label label-primary">7.7k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/screw-the-nut-2/" target="_self">
+                Screw the Nut 2
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Jul 19th, 2010</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Use your logic and get the screw on a specified place.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="14 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Cover Orange">
+        <a href="https://www.gameflare.com/online-game/cover-orange/" target="_self">
+            <img srcset="https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-120-90.jpg 120w,
+                    https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-150-113.jpg 150w,
+                    https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-180-135.jpg 180w,
+                    https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-220-165.jpg 220w,
+                    https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/503/pDoDHcaGq6cLvY-400-300.jpg" alt="Cover Orange online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">90%</span>
+
+            <span class="label label-primary">19.8k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/cover-orange/" target="_self">
+                Cover Orange
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Oct 24th, 2009</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Protect the smileys from the deadly rain. You will have to be inventive so that...
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="15 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Rag Doll Level Pack">
+        <a href="https://www.gameflare.com/online-game/rag-doll-level-pack/" target="_self">
+            <img srcset="https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-120-90.jpg 120w,
+                    https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-150-113.jpg 150w,
+                    https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-180-135.jpg 180w,
+                    https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-220-165.jpg 220w,
+                    https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/448/FAwpVRnsgQ3Q7S-400-300.jpg" alt="Rag Doll Level Pack online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">75%</span>
+
+            <span class="label label-primary">5.0k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/rag-doll-level-pack/" target="_self">
+                Rag Doll Level Pack
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Sep 10th, 2009</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Relatively simple online game where your only task is to shoot into the target....
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="16 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Red remover">
+        <a href="https://www.gameflare.com/online-game/red-remover/" target="_self">
+            <img srcset="https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-120-90.jpg 120w,
+                    https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-150-113.jpg 150w,
+                    https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-180-135.jpg 180w,
+                    https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-220-165.jpg 220w,
+                    https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/394/ysSUAFxlvcwIfX-400-300.jpg" alt="Red remover online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">89%</span>
+
+            <span class="label label-primary">66.4k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/red-remover/" target="_self">
+                Red remover
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Jul 30th, 2009</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            This online game is about logic. You have to remove the red blocks from the screen.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="17 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Portal Master">
+        <a href="https://www.gameflare.com/online-game/portal-master/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11333/SiuyoqRAhWSeBf-400-300.jpg" alt="Portal Master online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">83%</span>
+
+            <span class="label label-primary">322 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/portal-master/" target="_self">
+                Portal Master
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 4th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Each level challenges players to strategically place two linked portals to bypass spikes, traps, and seemingly impossible gaps.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="18 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Trees Hate You">
+        <a href="https://www.gameflare.com/online-game/trees-hate-you/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11319/3TP0lISUiBTFjC-400-300.jpg" alt="Trees Hate You online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">84%</span>
+
+            <span class="label label-primary">4.2k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/trees-hate-you/" target="_self">
+                Trees Hate You
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Apr 16th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Great indie experience that rewards persistence, curiosity, and a good sense of humor.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="19 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Wacky Steps">
+        <a href="https://www.gameflare.com/online-game/wacky-steps/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11309/bfkp3BcHdjaY6P-400-300.jpg" alt="Wacky Steps online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">96%</span>
+
+            <span class="label label-primary">601 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/wacky-steps/" target="_self">
+                Wacky Steps
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Apr 9th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            As you survive longer distances, you earn points and collect scattered gold coins.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    <div class="swiper-slide" role="group" aria-label="20 / 20" style="width: 224.125px;">
+                        <div class="item game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="RV Here Yet?">
+        <a href="https://www.gameflare.com/online-game/rv-here-yet/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11305/ZO2hNHQXLfl3EF-400-300.jpg" alt="RV Here Yet? online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">85%</span>
+
+            <span class="label label-primary">369 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/rv-here-yet/" target="_self">
+                RV Here Yet?
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Apr 7th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            The destination is optional, the adventure is guaranteed, and the asphalt is always calling.
+                    </p>
+    </div>
+</div>
+                    </div>
+                                    </div>
+    <span class="swiper-notification" aria-live="assertive" aria-atomic="true"></span></div>
+</div>
+
+    <div class="row" style="height: auto !important;">
+        <div class="col-sm-8" style="height: auto !important; min-height: 0px !important;">
+            <h3 id="comments-header">Comments</h3>
+
+<button type="button" data-href="https://www.gameflare.com/online-game/guardian-rock/" class="btn btn-primary pull-right btn-sm" data-pagination-refresh="">
+    <i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-sync fa-w-16 fa-fw" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="sync" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-fa-i2svg=""><path fill="currentColor" d="M440.65 12.57l4 82.77A247.16 247.16 0 0 0 255.83 8C134.73 8 33.91 94.92 12.29 209.82A12 12 0 0 0 24.09 224h49.05a12 12 0 0 0 11.67-9.26 175.91 175.91 0 0 1 317-56.94l-101.46-4.86a12 12 0 0 0-12.57 12v47.41a12 12 0 0 0 12 12H500a12 12 0 0 0 12-12V12a12 12 0 0 0-12-12h-47.37a12 12 0 0 0-11.98 12.57zM255.83 432a175.61 175.61 0 0 1-146-77.8l101.8 4.87a12 12 0 0 0 12.57-12v-47.4a12 12 0 0 0-12-12H12a12 12 0 0 0-12 12V500a12 12 0 0 0 12 12h47.35a12 12 0 0 0 12-12.6l-4.15-82.57A247.17 247.17 0 0 0 255.83 504c121.11 0 221.93-86.92 243.55-201.82a12 12 0 0 0-11.8-14.18h-49.05a12 12 0 0 0-11.67 9.26A175.86 175.86 0 0 1 255.83 432z"></path></svg></i>
+</button>
+
+<div class="comments">
+                        <div class="row comment-box comment-form ">
+    <div class="col-xs-2 comment-avatar">
+                    <img src="https://www.gameflare.com/images/no-avatar-100-100.jpg" alt="The player has no avatar" width="100" height="100">
+            </div>
+
+    <div class="col-xs-10">
+        <div class="comment-content clearfix">
+            <div id="reply-info" class="hidden">
+                <span class="reply-text"></span>
+
+                <a class="reply-remove" href="#">[Remove]</a>
+            </div>
+
+            <form class="turnstile" data-toggle="validator" method="POST" action="https://www.gameflare.com/common/game/435/comments/" data-action="https://www.gameflare.com/common/game/435/comments/" novalidate="true">
+                <input type="hidden" name="_token" value="lkLNOlqSpl1qnQjv0zexOen8pzyXOTxAwCHeWAzr" autocomplete="off">
+                                    <div class="form-group">
+                        <input type="text" name="unregistered_name" class="form-control" data-minlength="3" placeholder="User Name" data-required-error="The User Name field is required." data-minlength-error=" " required="" maxlength="20">
+
+                        <span class="help-block">Minimum number of characters: 3</span>
+
+                        <div class="help-block with-errors"></div>
+                    </div>
+                
+                                                    
+                <div class="form-group with-emoji with-gif-picker">
+                    <textarea class="form-control js-auto-size" id="comment-body" name="body" placeholder="Add your comment" rows="3" data-error="The Comment field is required." required=""></textarea>
+
+                                            <div data-gif-picker="#comment-body" data-gif-picker-limited="" data-enabled="false" data-validate="true" data-placeholder="Search GIFs in Tenor" data-tooltip="tooltip" title="" data-original-title="You must be logged in to add GIF to your comment"><i class="" data-fa-i2svg=""><svg class="svg-inline--fa fa-photo-video fa-w-20" aria-hidden="true" focusable="false" data-prefix="fal" data-icon="photo-video" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" data-fa-i2svg=""><path fill="currentColor" d="M608 0H160c-17.67 0-32 13.13-32 29.33V128h128V32h256v288h-32v32h128c17.67 0 32-13.13 32-29.33V29.33C640 13.13 625.67 0 608 0zM224 96h-64V32h64zm384 224h-64v-64h64zm0-96h-64v-96h64zm0-128h-64V32h64zm-192 64H32a32 32 0 0 0-32 32v288a32 32 0 0 0 32 32h384a32 32 0 0 0 32-32V192a32 32 0 0 0-32-32zm0 320H32v-24l81.69-61.26 80 40 126.84-95.14L416 403.23zm0-115.23l-96.53-64.36-129.16 96.86-80-40L32 416V192h384zM112 320a48 48 0 1 0-48-48 48 48 0 0 0 48 48zm0-64a16 16 0 1 1-16 16 16 16 0 0 1 16-16z"></path></svg></i></div>
+                    
+                    <div data-emoji="#comment-body" data-validate="true">😄</div>
+
+                    <div class="help-block with-errors"></div>
+                </div>
+
+                                    <div data-sitekey="0x4AAAAAACsXbJYwR1oRJbit" class="cf-turnstile" data-id="comment-turnstile" data-action="comment" data-appearance="interaction-only" data-execution="execute"><div><template shadowrootmode="closed"><iframe src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/f/ov2/av0/rch/i6jk9/0x4AAAAAACsXbJYwR1oRJbit/auto/fbE/new/normal?lang=auto" allow="cross-origin-isolated; fullscreen; autoplay; keyboard-map; gamepad" sandbox="allow-same-origin allow-scripts allow-popups" id="cf-chl-widget-i6jk9" tabindex="0" title="Widget containing a Cloudflare security challenge" style="border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; overflow: hidden; width: 1px; height: 1px; opacity: 0.01; position: fixed; left: 0px; top: 0px; visibility: visible; pointer-events: none; z-index: -1;"></iframe></template><input type="hidden" name="cf-turnstile-response" id="cf-chl-widget-i6jk9_response"></div></div>
+
+                
+                <input name="parent_id" type="hidden" value="">
+
+                <button type="submit" class="btn btn-primary pull-right margin-l-10 disabled">Send</button>
+
+                                    <p class="help-block">Please add comments only in English, otherwise it may be deleted.</p>
+                            </form>
+        </div>
+    </div>
+</div>
+
+                
+    
+    <div id="comments" data-pagination-target="">
+        <div id="pagination-comments" data-pagination-source="pagination-comments">
+                            <div class="text-center empty-message">
+                    There is no comment for this game, be first!
+                </div>
+                    </div>
+    </div>
+
+    </div>
+
+
+
+            <div class="row games-horizontal-promo">
+                <div class="games-horizontal-promo-box exclude-default-promo">
+                    <div class="adsense">
+        <ins class="adsbygoogle show" data-ad-client="ca-pub-6997479010326903" data-ad-slot="9419590453" data-ad-format="horizontal" data-full-width-responsive="true" data-adsbygoogle-status="done" style="height: 90px;" data-ad-status="filled"><div id="aswift_1_host" style="border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; height: 90px; width: 1159px; margin: 0px; padding: 0px; position: relative; visibility: visible; background-color: transparent; display: inline-block; overflow: visible;"><iframe id="aswift_1" name="aswift_1" style="left:0;position:absolute;top:0;border:0;width:1159px;height:90px;min-height:auto;max-height:none;min-width:auto;max-width:none;" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts allow-top-navigation-by-user-activation" width="1159" height="90" frameborder="0" marginwidth="0" marginheight="0" vspace="0" hspace="0" allowtransparency="true" scrolling="no" allow="attribution-reporting; run-ad-auction" src="https://googleads.g.doubleclick.net/pagead/ads?gdpr=0&amp;client=ca-pub-6997479010326903&amp;output=html&amp;h=90&amp;slotname=9419590453&amp;adk=1957355118&amp;adf=60548097&amp;pi=t.ma~as.9419590453&amp;w=1159&amp;fwrn=4&amp;fwrnh=100&amp;lmt=1778277723&amp;rafmt=2&amp;format=1159x90&amp;url=https%3A%2F%2Fwww.gameflare.com%2Fonline-game%2Fguardian-rock%2F&amp;fwr=0&amp;fwrattr=true&amp;rpe=1&amp;resp_fmts=2&amp;asro=0&amp;aiactd=0&amp;aicctd=0&amp;ailctd=0&amp;aimartd=4&amp;aieuf=1&amp;aicrs=1&amp;uach=WyJXaW5kb3dzIiwiMTAuMC4wIiwieDg2IiwiIiwiMTQ3LjAuNzcyNy4xMTYiLG51bGwsMCxudWxsLCI2NCIsW1siR29vZ2xlIENocm9tZSIsIjE0Ny4wLjc3MjcuMTE2Il0sWyJOb3QuQS9CcmFuZCIsIjguMC4wLjAiXSxbIkNocm9taXVtIiwiMTQ3LjAuNzcyNy4xMTYiXV0sMF0.&amp;abgtt=11&amp;dt=1778277722292&amp;bpp=2&amp;bdt=1142&amp;idt=460&amp;shv=r20260506&amp;mjsv=m202605040101&amp;ptt=9&amp;saldr=aa&amp;abxe=1&amp;cookie_enabled=1&amp;eoidce=1&amp;prev_fmts=400x280&amp;correlator=3878780051820&amp;frm=20&amp;pv=1&amp;u_tz=-240&amp;u_his=3&amp;u_h=1080&amp;u_w=1920&amp;u_ah=1040&amp;u_aw=1920&amp;u_cd=32&amp;u_sd=1&amp;dmc=8&amp;adx=112&amp;ady=1818&amp;biw=1905&amp;bih=953&amp;scr_x=0&amp;scr_y=0&amp;eid=31098359%2C95386813%2C42533294%2C95340253%2C95340255&amp;oid=2&amp;pvsid=7706203210003261&amp;tmod=434904251&amp;uas=0&amp;nvt=1&amp;ref=https%3A%2F%2Fwww.google.com%2F&amp;fc=896&amp;brdim=0%2C0%2C0%2C0%2C1920%2C0%2C1920%2C1040%2C1920%2C953&amp;vis=1&amp;rsz=%7C%7CoEebr%7C&amp;abl=CS&amp;pfx=0&amp;fu=128&amp;bc=31&amp;bz=1&amp;ifi=2&amp;uci=a!2&amp;btvi=1&amp;fsb=1&amp;dtd=861" data-google-container-id="a!2" tabindex="0" title="Advertisement" aria-label="Advertisement" data-google-query-id="CNiR5t_YqpQDFYG_fwQdeUguOQ" data-load-complete="true"></iframe></div></ins>
+    </div>
+
+    <div class="own-basic-horizontal-promo" oncontextmenu="return false;"></div>
+
+    <script>
+        window.addEventListener('DOMContentLoaded', function() {
+            checkPromo([
+                'https://www.gameflare.com/U3WAbEh5VQxOJo/basic-horizontal/o/',
+                'https://www.gameflare.com/U3WAbEh5VQxOJo/basic-horizontal/c/'
+            ], '.own-basic-horizontal-promo');
+
+            $(document).on('runBackupForDisabledAdsByEU', function() {
+                checkPromo([
+                    'https://www.gameflare.com/U3WAbEh5VQxOJo/basic-horizontal/o/',
+                    'https://www.gameflare.com/U3WAbEh5VQxOJo/basic-horizontal/c/'
+                ], '.own-basic-horizontal-promo');
+            });
+        });
+    </script>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-4 game-sidebar">
+            <h3>
+    <a href="https://www.gameflare.com/new-games/">
+        New Games
+    </a>
+</h3>
+
+<div class="games-cells clearfix">
+                        <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Chained Together: Co-Op Parkour">
+        <a href="https://www.gameflare.com/online-game/chained-together-co-op-parkour/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11341/1Dt2xE1uC6WCcu-400-300.jpg" alt="Chained Together: Co-Op Parkour online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">100%</span>
+
+            <span class="label label-primary">2 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/chained-together-co-op-parkour/" target="_self">
+                Chained Together: Co-Op Parkour
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 8th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Recover from dangerous falls, and survive increasingly difficult obstacle courses while racing against the clock.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Sprunki Re-Remastered">
+        <a href="https://www.gameflare.com/online-game/sprunki-re-remastered/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11340/keW1nyo8OwY9ca-400-300.jpg" alt="Sprunki Re-Remastered online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">86%</span>
+
+            <span class="label label-primary">606 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/sprunki-re-remastered/" target="_self">
+                Sprunki Re-Remastered
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 7th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Sprunki Re-Remastered is a polished reimagining of the original [game=sprunki]Sp...
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Terra Craft World">
+        <a href="https://www.gameflare.com/online-game/terra-craft-world/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11339/RbljGE4ourmLnW-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11339/RbljGE4ourmLnW-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11339/RbljGE4ourmLnW-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11339/RbljGE4ourmLnW-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11339/RbljGE4ourmLnW-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11339/RbljGE4ourmLnW-400-300.jpg" alt="Terra Craft World online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">90%</span>
+
+            <span class="label label-primary">57 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/terra-craft-world/" target="_self">
+                Terra Craft World
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 7th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Build impressive structures, gather valuable resources, craft essential tools, and survive against environmental dangers.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Obby: Skateboard for Brainrots">
+        <a href="https://www.gameflare.com/online-game/obby-skateboard-for-brainrots/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11338/BPH6FJ1kmBWQod-400-300.jpg" alt="Obby: Skateboard for Brainrots online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">93%</span>
+
+            <span class="label label-primary">247 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/obby-skateboard-for-brainrots/" target="_self">
+                Obby: Skateboard for Brainrots
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 6th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            As you earn more, you can unlock upgrades, reach new zones, and obtain rarer, more powerful characters.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Football Legends 2026">
+        <a href="https://www.gameflare.com/online-game/football-legends-2026/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11337/Lv0ZSrgiRGCjuO-400-300.jpg" alt="Football Legends 2026 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">100%</span>
+
+            <span class="label label-primary">111 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/football-legends-2026/" target="_self">
+                Football Legends 2026
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 6th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Play solo against AI or challenge friends in local multiplayer, mastering different characters and adapting your strategy to outplay opponents.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Plants vs Zombies: Fusion Nightmare">
+        <a href="https://www.gameflare.com/online-game/plants-vs-zombies-fusion-nightmare/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11336/eltetXw6Akqd4i-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11336/eltetXw6Akqd4i-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11336/eltetXw6Akqd4i-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11336/eltetXw6Akqd4i-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11336/eltetXw6Akqd4i-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11336/eltetXw6Akqd4i-400-300.jpg" alt="Plants vs Zombies: Fusion Nightmare online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">74%</span>
+
+            <span class="label label-primary">345 plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/plants-vs-zombies-fusion-nightmare/" target="_self">
+                Plants vs Zombies: Fusion Nightmare
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: May 5th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            To fight back, players must harness plant DNA fragments to engineer powerful hybrid chimeras.
+                    </p>
+    </div>
+</div>
+            </div>
+
+<h3>
+    <a href="https://www.gameflare.com/most-played-games/">
+        Popular Games
+    </a>
+</h3>
+
+<div class="games-cells clearfix">
+                        <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Monopoly Online">
+        <a href="https://www.gameflare.com/online-game/monopoly-online/" target="_self">
+            <img srcset="https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-120-90.jpg 120w,
+                    https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-150-113.jpg 150w,
+                    https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-180-135.jpg 180w,
+                    https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-220-165.jpg 220w,
+                    https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/7027/6BmAnPQOB5JJaV-400-300.jpg" alt="Monopoly Online online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-warning">67%</span>
+
+            <span class="label label-primary">3.2m plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/monopoly-online/" target="_self">
+                Monopoly Online
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Apr 28th, 2016</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Play monopoly online. This game is also available as board game but this time you can play online.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Five Nights at Epstein’s">
+        <a href="https://www.gameflare.com/online-game/five-nights-at-epstein-s/" target="_self">
+            <img srcset="https://data.gameflare.com/games/11242/mtwNEEJpnafK45-120-90.jpg 120w,
+                    https://data.gameflare.com/games/11242/mtwNEEJpnafK45-150-113.jpg 150w,
+                    https://data.gameflare.com/games/11242/mtwNEEJpnafK45-180-135.jpg 180w,
+                    https://data.gameflare.com/games/11242/mtwNEEJpnafK45-220-165.jpg 220w,
+                    https://data.gameflare.com/games/11242/mtwNEEJpnafK45-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/11242/mtwNEEJpnafK45-400-300.jpg" alt="Five Nights at Epstein’s online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">95%</span>
+
+            <span class="label label-primary">221k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/five-nights-at-epstein-s/" target="_self">
+                Five Nights at Epstein’s
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Feb 11th, 2026</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Five Nights at Epstein’s is a darkly satirical survival horror game that drops y...
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Sprunki Phase 5">
+        <a href="https://www.gameflare.com/online-game/sprunki-phase-5/" target="_self">
+            <img srcset="https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-120-90.jpg 120w,
+                    https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-150-113.jpg 150w,
+                    https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-180-135.jpg 180w,
+                    https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-220-165.jpg 220w,
+                    https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/10481/wCnNoGB0V55A4q-400-300.jpg" alt="Sprunki Phase 5 Original online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">87%</span>
+
+            <span class="label label-primary">2.7m plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/sprunki-phase-5/" target="_self">
+                Sprunki Phase 5
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Nov 2nd, 2024</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            With its darker, more suspenseful atmosphere, Sprunki Phase 5 (Original) takes the game to new heights.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Melon Sandbox">
+        <a href="https://www.gameflare.com/online-game/melon-sandbox/" target="_self">
+            <img srcset="https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-120-90.jpg 120w,
+                    https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-150-113.jpg 150w,
+                    https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-180-135.jpg 180w,
+                    https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-220-165.jpg 220w,
+                    https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/10240/WbsP7C6K57nTrH-400-300.jpg" alt="Melon Sandbox online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">90%</span>
+
+            <span class="label label-primary">980k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/melon-sandbox/" target="_self">
+                Melon Sandbox
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Feb 21st, 2024</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Experiment with physics, defy gravity and watch your creations come to life.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Super Bear Adventure">
+        <a href="https://www.gameflare.com/online-game/super-bear-adventure/" target="_self">
+            <img srcset="https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-120-90.jpg 120w,
+                    https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-150-113.jpg 150w,
+                    https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-180-135.jpg 180w,
+                    https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-220-165.jpg 220w,
+                    https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/10232/PqWmGTAkFAS7kL-400-300.jpg" alt="Mishka - Bear online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">90%</span>
+
+            <span class="label label-primary">387k plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/super-bear-adventure/" target="_self">
+                Super Bear Adventure
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Feb 15th, 2024</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Explore diverse animal kingdoms, each bursting with secrets and quirky inhabitants.
+                    </p>
+    </div>
+</div>
+                    <div class="col-xs-6 col-ml-4 blue-box game-cell">
+    <div data-toggle="popover-game" title="" data-original-title="Sprunki Phase 4">
+        <a href="https://www.gameflare.com/online-game/sprunki-phase-4/" target="_self">
+            <img srcset="https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-120-90.jpg 120w,
+                    https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-150-113.jpg 150w,
+                    https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-180-135.jpg 180w,
+                    https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-220-165.jpg 220w,
+                    https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-400-300.jpg 400w" sizes="(max-width:409px) 120px,
+                    (min-width:410px) and (max-width:499px) 150px,
+                    (min-width:500px) and (max-width:599px) 180px,
+                    (min-width:600px) and (max-width:767px) 220px,
+                    (min-width:768px) and (max-width:925px) 120px,
+                    (min-width:926px) and (max-width:1109px) 150px,
+                    (min-width:1110px) and (max-width:1299px) 180px,
+                    (min-width:1300px) and (max-width:1599px) 150px,
+                    (min-width:1600px) and (max-width:1869px) 180px,
+                    (min-width:1870px) and (max-width:2600px) 220px,
+                    400px" src="https://data.gameflare.com/games/10475/9mca1ES3jtxj2f-400-300.jpg" alt="Sprunki Phase 4 online game">
+
+                                                </a>
+
+        <p class="info">
+            <span class="label label-success">94%</span>
+
+            <span class="label label-primary">2.4m plays</span>
+        </p>
+
+        <p class="title">
+            <a href="https://www.gameflare.com/online-game/sprunki-phase-4/" target="_self">
+                Sprunki Phase 4
+            </a>
+        </p>
+
+        <p class="content hidden">
+            <span class="game-popover-info">
+                <span class="label label-success">Published: Oct 30th, 2024</span>
+
+                <span class="label label-primary">HTML5</span>
+            </span>
+
+                            Dive into this thrilling adventure and explore the limitless possibilities of sound as you create your very own eerie soundtracks.
+                    </p>
+    </div>
+</div>
+            </div>
+        </div>
+    </div>
+            </div>
 </body>
 </html>

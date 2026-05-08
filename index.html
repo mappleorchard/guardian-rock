@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardian Rock - Enhanced Edition</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0c;
+            --panel-color: #1e1e24;
+            --text-color: #f0f0f0;
+            --accent-color: #ffcc00;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 40px rgba(0,0,0,1);
+            border: 6px solid #333;
+            background: #111;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #aaa;
+        }
+
+        #coin-count {
+            color: var(--accent-color);
+        }
+
+        #level-complete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 30px;
+            border: 3px solid var(--accent-color);
+            text-align: center;
+            display: none;
+            pointer-events: auto;
+            z-index: 100;
+        }
+
+        button {
+            background: var(--accent-color);
+            border: 2px solid #fff;
+            padding: 12px 24px;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        .controls-hint {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: #555;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="ui-overlay">
+            <div>LVL <span id="level-num">1</span></div>
+            <div>COINS <span id="coin-count">0</span></div>
+            <div>STEPS <span id="step-count">0</span></div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="level-complete">
+            <h2 id="complete-text">CHAMBER CLEARED</h2>
+            <button onclick="nextLevel()">CONTINUE</button>
+        </div>
+    </div>
+
+    <div class="controls-hint">
+        8-4-2-6 / ARROWS to Move | R to Reset<br>
+        <span style="color:#00aaff">Cyan Blocks are Ghosts - Watch your timing!</span>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+const levelNumDisplay = document.getElementById('level-num');
+const stepCountDisplay = document.getElementById('step-count');
+const coinCountDisplay = document.getElementById('coin-count');
+const completeOverlay = document.getElementById('level-complete');
+
+const TILE_SIZE = 48;
+const COLS = 12;
+const ROWS = 10;
+canvas.width = COLS * TILE_SIZE;
+canvas.height = ROWS * TILE_SIZE;
+
+/**
+ * MAP CODES:
+ * 0: Empty, 1: Wall, 2: Player Start, 3: Exit, 4: Breakable, 
+ * 5: Spike, 6: Coin, 7: Cannon, B: Ghost Block
+ */
+const LEVEL_DATA = [
+    ["111111111111","120000000031","100000000001","100000000001","100000000001","100000000001","100000000001","100000000001","100000000001","111111111111"],
+    ["111111111111","120000001001","100000000001","100000000031","100000000001","100100001001","100000000001","100100000001","100000000001","111111111111"],
+    ["111111111111","120006001001","100000000001","100000000031","100000000001","100100061001","100000000001","100100010001","100000000001","111111111111"],
+    ["111111111111","120040001001","100000000001","100000001031","100000000001","100100000001","100000000001","100100000001","100000000001","111111111111"],
+    ["111111111111","120000005031","100010000001","100050010001","100000060001","100000000001","100000001001","100004000001","100000000001","111111111111"],
+    ["111111111111","120000000001","100000000001","100010000001","100000000031","100000000001","100000070001","100000000001","100000000001","111111111111"],
+    ["111111111111","1200B0005001","100000000001","100000000031","100000000001","100100000001","100000000001","100000000001","100000000001","111111111111"],
+    ["111111111111","120000010031","100000000001","10000B00B001","100610160001","100000000001","100001000001","100000000001","100000000001","111111111111"],
+    ["111111111111","120000000001","10001B100001","100000001001","10001B100001","100000000001","100000001001","100000000031","100000000001","111111111111"],
+    ["111111111111","1200B0401031","100000000001","111100001001","100004000001","100B00001001","100000000001","100000000001","100000000001","111111111111"]
+];
+
+const LEVELS = LEVEL_DATA.map(arr => arr.join(""));
+
+let currentLevelIndex = 0;
+let grid = [];
+let player = { x: 0, y: 0, visualX: 0, visualY: 0, isMoving: false };
+let projectiles = [];
+let pendingBreaks = []; // {x, y, startFrame}
+let steps = 0;
+let coinsRequired = 0;
+let coinsCollected = 0;
+let gameActive = true;
+let frameCount = 0;
+
+let ghostAlpha = 0;
+let isGhostSolid = false;
+
+function initLevel(index) {
+    const levelStr = LEVELS[index];
+    grid = [];
+    steps = 0;
+    coinsCollected = 0;
+    coinsRequired = 0;
+    projectiles = [];
+    pendingBreaks = [];
+    gameActive = true;
+    completeOverlay.style.display = 'none';
+
+    for (let r = 0; r < ROWS; r++) {
+        grid[r] = [];
+        for (let c = 0; c < COLS; c++) {
+            const char = levelStr[r * COLS + c];
+            const val = parseInt(char, 16);
+            
+            if (val === 2) {
+                player.x = c;
+                player.y = r;
+                player.visualX = c;
+                player.visualY = r;
+                player.isMoving = false;
+                grid[r][c] = 0;
+            } else if (val === 6) {
+                coinsRequired++;
+                grid[r][c] = val;
+            } else {
+                grid[r][c] = val;
+            }
+        }
+    }
+    updateUI();
+}
+
+function updateUI() {
+    stepCountDisplay.innerText = steps;
+    coinCountDisplay.innerText = `${coinsCollected}/${coinsRequired}`;
+    levelNumDisplay.innerText = currentLevelIndex + 1;
+}
+
+function move(dx, dy) {
+    if (player.isMoving || !gameActive) return;
+
+    let nextX = player.x;
+    let nextY = player.y;
+    let moved = false;
+
+    while (true) {
+        let testX = nextX + dx;
+        let testY = nextY + dy;
+
+        if (testX < 0 || testX >= COLS || testY < 0 || testY >= ROWS) break;
+
+        const cell = grid[testY][testX];
+
+        if (cell === 1 || (cell >= 7 && cell <= 10) || (cell === 11 && isGhostSolid)) { 
+            break;
+        } else if (cell === 4) { 
+            // Register a pending break instead of instant removal
+            if (!pendingBreaks.find(b => b.x === testX && b.y === testY)) {
+                pendingBreaks.push({ x: testX, y: testY, startFrame: frameCount });
+            }
+            moved = true;
+            break;
+        } else if (cell === 5) { 
+            nextX = testX;
+            nextY = testY;
+            moved = true;
+            break;
+        } else if (cell === 6) { 
+            grid[testY][testX] = 0;
+            coinsCollected++;
+            updateUI();
+            nextX = testX;
+            nextY = testY;
+            moved = true;
+        } else if (cell === 3) { 
+            if (coinsCollected >= coinsRequired) {
+                nextX = testX;
+                nextY = testY;
+                moved = true;
+                break;
+            } else {
+                break;
+            }
+        } else {
+            nextX = testX;
+            nextY = testY;
+            moved = true;
+        }
+    }
+
+    if (moved) {
+        steps++;
+        updateUI();
+        animateMove(nextX, nextY);
+    }
+}
+
+function animateMove(tx, ty) {
+    player.isMoving = true;
+    const startX = player.x;
+    const startY = player.y;
+    const duration = 120;
+    const startTime = performance.now();
+
+    function step(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        player.visualX = startX + (tx - startX) * progress;
+        player.visualY = startY + (ty - startY) * progress;
+
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            player.x = tx;
+            player.y = ty;
+            player.visualX = tx;
+            player.visualY = ty;
+            player.isMoving = false;
+            checkLogic();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function checkLogic() {
+    const cell = grid[player.y][player.x];
+    if (cell === 5) {
+        resetLevel(); 
+    } else if (cell === 3 && coinsCollected >= coinsRequired) {
+        winLevel();
+    }
+}
+
+function winLevel() {
+    gameActive = false;
+    completeOverlay.style.display = 'block';
+}
+
+function resetLevel() {
+    initLevel(currentLevelIndex);
+}
+
+function nextLevel() {
+    currentLevelIndex++;
+    if (currentLevelIndex >= LEVELS.length) {
+        completeOverlay.innerHTML = "<h2>GAME COMPLETE</h2><p>You have conquered the tomb!</p>";
+    } else {
+        initLevel(currentLevelIndex);
+    }
+}
+
+function updateProjectiles() {
+    if (!gameActive) return;
+
+    if (frameCount % 100 === 0) {
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cell = grid[r][c];
+                if (cell >= 7 && cell <= 10) {
+                    const dx = player.visualX - c;
+                    const dy = player.visualY - r;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist > 0) {
+                        projectiles.push({x: c, y: r, dx: dx / dist, dy: dy / dist});
+                    }
+                }
+            }
+        }
+    }
+
+    if (frameCount % 4 === 0) {
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            p.x += p.dx * 0.25;
+            p.y += p.dy * 0.25;
+
+            const gx = Math.round(p.x);
+            const gy = Math.round(p.y);
+            
+            if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS || 
+                grid[gy][gx] === 1 || 
+                grid[gy][gx] === 4 || 
+                (grid[gy][gx] === 11 && isGhostSolid)) {
+                projectiles.splice(i, 1);
+                continue;
+            }
+
+            const dist = Math.hypot(p.x - player.visualX, p.y - player.visualY);
+            if (dist < 0.4) {
+                resetLevel();
+                return;
+            }
+        }
+    }
+}
+
+function updatePendingBreaks() {
+    const BREAK_DELAY = 30; // Frames to wait
+    for (let i = pendingBreaks.length - 1; i >= 0; i--) {
+        const b = pendingBreaks[i];
+        if (frameCount - b.startFrame >= BREAK_DELAY) {
+            grid[b.y][b.x] = 0;
+            pendingBreaks.splice(i, 1);
+        }
+    }
+}
+
+function render() {
+    frameCount++;
+
+    const ghostPhase = frameCount % 160;
+    if (ghostPhase < 20) {
+        ghostAlpha = ghostPhase / 20; 
+        isGhostSolid = false;
+    } else if (ghostPhase < 80) {
+        ghostAlpha = 1;               
+        isGhostSolid = true;
+    } else if (ghostPhase < 100) {
+        ghostAlpha = 1 - ((ghostPhase - 80) / 20); 
+        isGhostSolid = false;
+    } else {
+        ghostAlpha = 0;               
+        isGhostSolid = false;
+    }
+
+    if (gameActive && !player.isMoving && isGhostSolid && grid[player.y][player.x] === 11) {
+        resetLevel();
+        return;
+    }
+
+    updateProjectiles();
+    updatePendingBreaks();
+    
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const x = c * TILE_SIZE;
+            const y = r * TILE_SIZE;
+            const cell = grid[r][c];
+
+            ctx.strokeStyle = '#111';
+            ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+
+            if (cell === 1) { 
+                ctx.fillStyle = '#333';
+                ctx.fillRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+                ctx.fillStyle = '#222';
+                ctx.fillRect(x + 8, y + 8, TILE_SIZE - 16, TILE_SIZE - 16);
+            } else if (cell === 3) { 
+                const glow = Math.abs(Math.sin(frameCount * 0.05)) * 10;
+                ctx.shadowBlur = glow;
+                ctx.shadowColor = (coinsCollected >= coinsRequired) ? '#00ffcc' : '#ff3300';
+                ctx.fillStyle = ctx.shadowColor;
+                ctx.beginPath();
+                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, TILE_SIZE/3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            } else if (cell === 4) { 
+                const isPending = pendingBreaks.find(b => b.x === c && b.y === r);
+                ctx.fillStyle = '#5d4037';
+                
+                let shakeX = 0;
+                let shakeY = 0;
+                if (isPending) {
+                    shakeX = (Math.random() - 0.5) * 4;
+                    shakeY = (Math.random() - 0.5) * 4;
+                    ctx.fillStyle = '#8d6e63'; 
+                }
+
+                ctx.fillRect(x + 4 + shakeX, y + 4 + shakeY, TILE_SIZE - 8, TILE_SIZE - 8);
+                ctx.strokeStyle = '#3e2723';
+                ctx.strokeRect(x + 8 + shakeX, y + 8 + shakeY, TILE_SIZE - 16, TILE_SIZE - 16);
+                
+                if (isPending) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + 10 + shakeX, y + 10 + shakeY);
+                    ctx.lineTo(x + 30 + shakeX, y + 38 + shakeY);
+                    ctx.stroke();
+                }
+            } else if (cell === 5) { 
+                ctx.fillStyle = '#777';
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + (i * 15) + 5, y + TILE_SIZE - 5);
+                    ctx.lineTo(x + (i * 15) + 12, y + 5);
+                    ctx.lineTo(x + (i * 15) + 19, y + TILE_SIZE - 5);
+                    ctx.fill();
+                }
+            } else if (cell === 6) { 
+                const bounce = Math.sin(frameCount * 0.1) * 5;
+                ctx.fillStyle = '#ffd700';
+                ctx.beginPath();
+                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2 + bounce, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#b8860b';
+                ctx.stroke();
+            } else if (cell >= 7 && cell <= 10) { 
+                ctx.fillStyle = '#444';
+                ctx.fillRect(x + 4, y + 4, TILE_SIZE-8, TILE_SIZE-8);
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 10, 0, Math.PI*2);
+                ctx.fill();
+            } else if (cell === 11) { 
+                ctx.save();
+                ctx.globalAlpha = 0.15 + (ghostAlpha * 0.85); 
+                ctx.fillStyle = '#00aaff';
+                ctx.fillRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                ctx.globalAlpha = ghostAlpha;
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x + 6, y + 6, TILE_SIZE - 12, TILE_SIZE - 12);
+                ctx.restore();
+            }
+        }
+    }
+
+    ctx.fillStyle = '#ff3300';
+    projectiles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x * TILE_SIZE + TILE_SIZE/2, p.y * TILE_SIZE + TILE_SIZE/2, 6, 0, Math.PI*2);
+        ctx.fill();
+    });
+
+    const px = player.visualX * TILE_SIZE;
+    const py = player.visualY * TILE_SIZE;
+    ctx.fillStyle = '#888';
+    ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(px + 10, py + 14, 8, 8);
+    ctx.fillRect(px + TILE_SIZE - 18, py + 14, 8, 8);
+    ctx.fillStyle = '#ff0000'; 
+    ctx.fillRect(px + 12, py + 16, 4, 4);
+    ctx.fillRect(px + TILE_SIZE - 16, py + 16, 4, 4);
+
+    requestAnimationFrame(render);
+}
+
+window.addEventListener('keydown', (e) => {
+    switch(e.key) {
+        case '8': case 'ArrowUp': move(0, -1); break;
+        case '2': case 'ArrowDown': move(0, 1); break;
+        case '4': case 'ArrowLeft': move(-1, 0); break;
+        case '6': case 'ArrowRight': move(1, 0); break;
+        case 'r': case 'R': resetLevel(); break;
+    }
+});
+
+initLevel(0);
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
